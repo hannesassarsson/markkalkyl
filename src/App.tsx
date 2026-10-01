@@ -7,6 +7,7 @@ import { AuthView, NewPasswordView } from './views/AuthView'
 import { CompanyView } from './views/CompanyView'
 import { OnboardingView } from './views/OnboardingView'
 import { PriceListView } from './views/PriceListView'
+import { PublicQuoteView } from './views/PublicQuoteView'
 import { QuoteEditor } from './views/QuoteEditor'
 import { QuoteList } from './views/QuoteList'
 import { QuotePrint } from './views/QuotePrint'
@@ -29,7 +30,21 @@ const go = (path: string) => {
   window.location.hash = path
 }
 
+/** Kundlänkar har formen #/o/<token> och visas utan inloggning */
+const publicToken = (hash: string) => hash.match(/^#\/o\/([0-9a-f-]{36})$/i)?.[1] ?? null
+
 export default function App() {
+  const [token, setToken] = useState(() => publicToken(window.location.hash))
+  useEffect(() => {
+    const onHash = () => setToken(publicToken(window.location.hash))
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+  if (token) return <PublicQuoteView key={token} token={token} />
+  return <SignedInApp />
+}
+
+function SignedInApp() {
   const [session, setSession] = useState<Session | null | undefined>(undefined)
   const [recovering, setRecovering] = useState(false)
 
@@ -136,8 +151,15 @@ function Workspace({ userId, email }: { userId: string; email: string }) {
         {route.page === 'offert' && quote && (
           <QuoteEditor
             quote={quote}
+            company={ws.company}
             currentPrices={ws.prices}
+            templates={ws.templates}
             onChange={actions.updateQuote}
+            onStatus={(st) => actions.setStatus(quote, st)}
+            onShare={() => actions.shareQuote(quote)}
+            onUnshare={() => actions.unshareQuote(quote)}
+            onSaveTemplate={actions.saveTemplate}
+            onDeleteTemplate={actions.deleteTemplate}
             onPrint={() => go(`/utskrift/${quote.id}`)}
             onBack={() => go('/')}
             onDuplicate={async () => {

@@ -135,6 +135,8 @@ export type Quote = {
   lines: Line[]
   /** Prislistan låses när offerten skapas så att senare prisändringar inte flyttar en skickad offert */
   prices: PriceList
+  /** Utskick och kundens svar. Sätts av databasen, sparas inte med innehållet. */
+  tracking?: QuoteTracking
 }
 
 export type Company = {
@@ -175,4 +177,34 @@ export type QuoteTotals = {
   rot: number
   rotCapped: boolean
   toPay: number
+}
+
+/** Det kunden ser: färdigräknade rader och summor, utan interna priser och kalkylvärden */
+export type PublicView = {
+  title: string
+  customer: Quote['customer']
+  siteAddress: string
+  customerType: CustomerType
+  validDays: number
+  notes: string
+  lines: { label: string; quantity: string; amount: number }[]
+  totals: { net: number; labor: number; vatRate: number; vat: number; gross: number; rot: number; toPay: number }
+}
+
+/** Utskick och kundens svar, styrs av databasen och sparas inte med offertens innehåll */
+export type QuoteTracking = {
+  shareToken: string | null
+  sentAt: string | null
+  viewedAt: string | null
+  viewCount: number
+  respondedAt: string | null
+  response: 'accepted' | 'declined' | null
+  responseName: string | null
+  responseMessage: string | null
+}
+
+export type Template = {
+  id: string
+  name: string
+  lines: Line[]
 }
