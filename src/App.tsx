@@ -1,6 +1,11 @@
+import type { Session } from '@supabase/supabase-js'
 import { useEffect, useState } from 'react'
-import { duplicateQuote, newQuote, useAppData } from './lib/store'
+import { Button } from './components/ui'
+import { useWorkspace, type SaveState } from './lib/store'
+import { supabase } from './lib/supabase'
+import { AuthView, NewPasswordView } from './views/AuthView'
 import { CompanyView } from './views/CompanyView'
+import { OnboardingView } from './views/OnboardingView'
 import { PriceListView } from './views/PriceListView'
 import { QuoteEditor } from './views/QuoteEditor'
 import { QuoteList } from './views/QuoteList'
@@ -25,8 +30,34 @@ const go = (path: string) => {
 }
 
 export default function App() {
-  const { data, update, replace } = useAppData()
+  const [session, setSession] = useState<Session | null | undefined>(undefined)
+  const [recovering, setRecovering] = useState(false)
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session))
+    const { data } = supabase.auth.onAuthStateChange((event, s) => {
+      setSession(s)
+      if (event === 'PASSWORD_RECOVERY') setRecovering(true)
+    })
+    return () => data.subscription.unsubscribe()
+  }, [])
+
+  if (session === undefined) return <Splash />
+  if (!session) return <AuthView />
+  if (recovering) return <NewPasswordView onDone={() => setRecovering(false)} />
+  return <Workspace key={session.user.id} userId={session.user.id} email={session.user.email ?? ''} />
+}
+
+function Splash({ text = 'Laddar…' }: { text?: string }) {
+  return <div className="grid min-h-full place-items-center text-muted">{text}</div>
+}
+
+const saveText: Record<SaveState, string> = { saved: 'Sparat', saving: 'Sparar…', error: 'Kunde inte spara' }
+
+function Workspace({ userId, email }: { userId: string; email: string }) {
+  const { state, saveState, actions, reload } = useWorkspace(userId)
   const [route, setRoute] = useState(() => parseHash(window.location.hash))
+  const signOut = () => void supabase.auth.signOut()
 
   useEffect(() => {
     const onHash = () => {
@@ -37,13 +68,29 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
-  const createQuote = () => {
-    const { data: next, quote } = newQuote(data)
-    replace(next)
-    go(`/offert/${quote.id}`)
-  }
+  if (state.status === 'loading') return <Splash />
+  if (state.status === 'error')
+    return (
+      <div className="grid min-h-full place-items-center px-4 text-center">
+        <div>
+          <p className="font-display text-2xl font-bold uppercase">Kunde inte hämta data</p>
+          <p className="text-muted">{state.message}</p>
+          <div className="mt-3 flex justify-center gap-2">
+            <Button variant="primary" onClick={() => void reload()}>Försök igen</Button>
+            <Button variant="ghost" onClick={signOut}>Logga ut</Button>
+          </div>
+        </div>
+      </div>
+    )
+  if (state.status === 'no-company') return <OnboardingView email={email} onCreate={actions.createCompany} onSignOut={signOut} />
 
-  const quote = 'id' in route ? data.quotes.find((q) => q.id === route.id) : undefined
+  const ws = state.ws
+  const quote = 'id' in route ? ws.quotes.find((q) => q.id === route.id) : undefined
+
+  const createQuote = async () => {
+    const q = await actions.createQuote()
+    if (q) go(`/offert/${q.id}`)
+  }
 
   const nav = [
     { href: '/', label: 'Offerter', active: route.page === 'offerter' || route.page === 'offert' || route.page === 'utskrift' },
@@ -69,47 +116,63 @@ export default function App() {
               </a>
             ))}
           </nav>
+          <div className="ml-auto flex items-center gap-3 text-sm">
+            <span
+              role="status"
+              className={`text-xs ${saveState === 'error' ? 'font-semibold text-warn' : 'text-muted'}`}
+              title={saveState === 'error' ? 'Kontrollera internetanslutningen. Ändringen sparas vid nästa redigering.' : undefined}
+            >
+              {saveText[saveState]}
+            </span>
+            <span className="hidden text-muted md:inline">{ws.company.name}</span>
+            <Button variant="ghost" onClick={signOut}>Logga ut</Button>
+          </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 print:p-0">
-        {route.page === 'offerter' && <QuoteList quotes={data.quotes} onNew={createQuote} onOpen={(id) => go(`/offert/${id}`)} />}
+        {route.page === 'offerter' && <QuoteList quotes={ws.quotes} onNew={() => void createQuote()} onOpen={(id) => go(`/offert/${id}`)} />}
 
         {route.page === 'offert' && quote && (
           <QuoteEditor
             quote={quote}
-            currentPrices={data.prices}
-            onChange={(q) => update((d) => ({ ...d, quotes: d.quotes.map((x) => (x.id === q.id ? q : x)) }))}
+            currentPrices={ws.prices}
+            onChange={actions.updateQuote}
             onPrint={() => go(`/utskrift/${quote.id}`)}
             onBack={() => go('/')}
-            onDuplicate={() => {
-              const { data: next, quote: copy } = duplicateQuote(data, quote)
-              replace(next)
-              go(`/offert/${copy.id}`)
+            onDuplicate={async () => {
+              const copy = await actions.createQuote(quote)
+              if (copy) go(`/offert/${copy.id}`)
             }}
             onDelete={() => {
-              update((d) => ({ ...d, quotes: d.quotes.filter((x) => x.id !== quote.id) }))
+              actions.deleteQuote(quote.id)
               go('/')
             }}
           />
         )}
 
-        {route.page === 'utskrift' && quote && (
-          <QuotePrint quote={quote} company={data.company} onBack={() => go(`/offert/${quote.id}`)} />
-        )}
+        {route.page === 'utskrift' && quote && <QuotePrint quote={quote} company={ws.company} onBack={() => go(`/offert/${quote.id}`)} />}
 
         {'id' in route && !quote && (
           <div className="py-16 text-center">
             <p className="font-display text-2xl font-bold uppercase">Offerten finns inte</p>
-            <p className="text-muted">Den kan ha tagits bort, eller sparats i en annan webbläsare.</p>
+            <p className="text-muted">Den kan ha tagits bort.</p>
             <a href="#/" className="mt-3 inline-block font-semibold text-accent">Till offerterna</a>
           </div>
         )}
 
-        {route.page === 'prislista' && <PriceListView prices={data.prices} onChange={(prices) => update((d) => ({ ...d, prices }))} />}
+        {route.page === 'prislista' && <PriceListView prices={ws.prices} onChange={actions.updatePrices} />}
 
         {route.page === 'foretag' && (
-          <CompanyView data={data} onCompany={(company) => update((d) => ({ ...d, company }))} onImport={replace} />
+          <CompanyView
+            ws={ws}
+            userId={userId}
+            onCompany={actions.updateCompany}
+            onInvite={actions.invite}
+            onRemoveInvite={(e) => void actions.removeInvite(e)}
+            onRemoveMember={(id) => void actions.removeMember(id)}
+            onImport={actions.importBackup}
+          />
         )}
       </main>
     </div>

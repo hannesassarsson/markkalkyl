@@ -1,4 +1,4 @@
-import type { Company, Line, PriceList } from './types'
+import type { Line, PriceList } from './types'
 
 export const uid = () => Math.random().toString(36).slice(2, 10)
 
@@ -34,16 +34,6 @@ export const defaultPrices: PriceList = {
   laborRate: 550,
   materialMarkupPct: 15,
   hourRoundingStep: 0.5,
-}
-
-export const defaultCompany: Company = {
-  name: 'J&L Schakt och Entreprenad AB',
-  orgNr: '559367-5944',
-  address: 'Tornavägen 87, 272 97 Gärsnäs',
-  phone: '072-232 63 27',
-  email: 'info@jlschakt.se',
-  bankgiro: '',
-  fSkatt: true,
 }
 
 export const blankLine = (kind: Line['kind'], prices: PriceList): Line => {
